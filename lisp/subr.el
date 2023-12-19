@@ -7497,6 +7497,36 @@ predicate conditions in CONDITION."
         (push buf bufs)))
     bufs))
 
+(defmacro handler-bind (handlers &rest body)
+  "Setup error HANDLERS around execution of BODY.
+HANDLERS is a list of (CONDITIONS HANDLER) where
+CONDITIONS should be a list of condition names (symbols) or
+a single condition name and HANDLER is a form whose evaluation
+returns a function.
+When an error is signaled during execution of BODY, if that
+error matches CONDITIONS, then the associated HANDLER
+function is called with the error as argument.
+HANDLERs can either transfer the control via a non-local exit,
+or return normally.  If they return normally the search for an
+error handler continues from where it left off."
+  ;; FIXME: Completion support as in `condition-case'?
+  (declare (indent 1) (debug ((&rest (sexp form)) body)))
+  (let ((args '())
+        (bindings '()))
+    (dolist (cond+handler (reverse handlers))
+      (let ((handler (car (cdr cond+handler)))
+            (conds (car cond+handler))
+            (handlersym (gensym "handler")))
+        (push (list handlersym handler) bindings)
+        (if (not (listp conds))
+            (progn
+              (push handlersym args)
+              (push `',conds args))
+          (dolist (cond conds)
+            (push handlersym args)
+            (push `',cond args)))))
+    `(let ,bindings (handler-bind-1 (lambda () ,@body) ,@args))))
+
 (defmacro with-memoization (place &rest code)
   "Return the value of CODE and stash it in PLACE.
 If PLACE's value is non-nil, then don't bother evaluating CODE

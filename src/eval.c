@@ -1192,6 +1192,12 @@ usage: (catch TAG BODY...)  */)
 
 #define clobbered_eassert(E) verify (sizeof (E) != 0)
 
+static void
+pop_handler (void)
+{
+  handlerlist = handlerlist->next;
+}
+
 /* Set up a catch, then call C function FUNC on argument ARG.
    FUNC should return a Lisp_Object.
    This is how catches are done from within C code.  */
@@ -1353,6 +1359,37 @@ usage: (condition-case VAR BODYFORM &rest HANDLERS)  */)
   Lisp_Object handlers = XCDR (XCDR (args));
 
   return internal_lisp_condition_case (var, bodyform, handlers);
+}
+
+DEFUN ("handler-bind-1", Fhandler_bind_1, Shandler_bind_1, 1, MANY, 0,
+       doc: /* Setup error handlers around execution of BODYFUN.
+BODYFUN be a function and it is called with no arguments.
+CONDITION should be a condition name (symbol).
+When an error is signaled during executon of BODYFUN, if that
+error matches CONDITION, then the associated HANDLER is
+called with the error as argument.
+HANDLER should either transfer the control via a non-local exit,
+or return normally.
+If it returns normally, the search for an error handler continues
+from where it left off.
+
+usage: (handler-bind BODYFUN [CONDITION HANDLER]...)  */)
+  (ptrdiff_t nargs, Lisp_Object *args)
+{
+  eassert (nargs >= 1);
+  Lisp_Object bodyfun = args[0];
+  Lisp_Object map = Qnil;
+  ptrdiff_t i = 2;
+  while (i < nargs)
+    {
+      Lisp_Object condition = args[i - 1], handler = args[i];
+      map = Fcons (Fcons (condition, handler), map);
+      i += 2;
+    }
+  push_handler (Fnreverse (map), HANDLER);
+  Lisp_Object ret = call0 (bodyfun);
+  pop_handler ();
+  return ret;
 }
 
 /* Like Fcondition_case, but the args are separate
@@ -1731,6 +1768,7 @@ signal_or_quit (Lisp_Object error_symbol, Lisp_Object data, bool keyboard_quit)
     = (NILP (error_symbol) ? Fcar (data) : error_symbol);
   Lisp_Object clause = Qnil;
   struct handler *h;
+  int skip;
 
   if (gc_in_progress || waiting_for_input)
     emacs_abort ();
@@ -1753,6 +1791,7 @@ signal_or_quit (Lisp_Object error_symbol, Lisp_Object data, bool keyboard_quit)
       /* Edebug takes care of restoring these variables when it exits.  */
       max_ensure_room (&max_lisp_eval_depth, lisp_eval_depth, 20);
 
+      /* FIXME: 'handler-bind' makes `signal-hook-function' obsolete?  */
       call2 (Vsignal_hook_function, error_symbol, data);
     }
 
@@ -1772,16 +1811,53 @@ signal_or_quit (Lisp_Object error_symbol, Lisp_Object data, bool keyboard_quit)
 	Vsignaling_function = backtrace_function (pdl);
     }
 
-  for (h = handlerlist; h; h = h->next)
+  for (skip = 0, h = handlerlist; h; skip++, h = h->next)
     {
-      if (h->type == CATCHER_ALL)
+      switch (h->type)
         {
+        case CATCHER_ALL:
           clause = Qt;
           break;
-        }
-      if (h->type != CONDITION_CASE)
-	continue;
-      clause = find_handler_clause (h->tag_or_ch, conditions);
+	case CATCHER:
+	  continue;
+        case CONDITION_CASE:
+          clause = find_handler_clause (h->tag_or_ch, conditions);
+	  break;
+	case HANDLER:
+	  {
+	    Lisp_Object handlers = h->tag_or_ch;
+	    for (; CONSP (handlers); handlers = XCDR (handlers))
+	      {
+	        Lisp_Object handler = XCAR (handlers);
+	        if (CONSP (handler)
+	            && !NILP (Fmemq (XCAR (handler), conditions)))
+	          {
+	            Lisp_Object error_data
+	              = (NILP (error_symbol)
+	                 ? data : Fcons (error_symbol, data));
+	            push_handler (make_fixnum (skip), SKIP_CONDITIONS);
+	            Lisp_Object retval = call1 (XCDR (handler), error_data);
+	            pop_handler ();
+	            if (CONSP (retval))
+	              {
+	                error_symbol = XCAR (retval);
+	                data = XCDR (retval);
+	                conditions = Fget (error_symbol, Qerror_conditions);
+	              }
+	          }
+	      }
+	    continue;
+	  }
+	case SKIP_CONDITIONS:
+	  {
+	    int toskip = XFIXNUM (h->tag_or_ch);
+	    while (toskip-- >= 0)
+	      h = h->next;
+	    continue;
+	  }
+	default:
+	  abort ();
+	}
       if (!NILP (clause))
 	break;
     }
@@ -1798,7 +1874,7 @@ signal_or_quit (Lisp_Object error_symbol, Lisp_Object data, bool keyboard_quit)
 	  || (CONSP (clause) && !NILP (Fmemq (Qdebug, clause)))
 	  /* Special handler that means "print a message and run debugger
 	     if requested".  */
-	  || EQ (h->tag_or_ch, Qerror)))
+	  || EQ (clause, Qerror)))
     {
       debugger_called
 	= maybe_call_debugger (conditions, error_symbol, data);
@@ -1812,8 +1888,9 @@ signal_or_quit (Lisp_Object error_symbol, Lisp_Object data, bool keyboard_quit)
      with debugging.  Make sure to use `debug-early' unconditionally
      to not interfere with ERT or other packages that install custom
      debuggers.  */
+  /* FIXME: This could be turned into a `handler-bind` at toplevel?  */
   if (!debugger_called && !NILP (error_symbol)
-      && (NILP (clause) || EQ (h->tag_or_ch, Qerror))
+      && (NILP (clause) || EQ (clause, Qerror))
       && noninteractive && backtrace_on_error_noninteractive
       && NILP (Vinhibit_debugger)
       && !NILP (Ffboundp (Qdebug_early)))
@@ -1827,6 +1904,7 @@ signal_or_quit (Lisp_Object error_symbol, Lisp_Object data, bool keyboard_quit)
 
   /* If an error is signaled during a Lisp hook in redisplay, write a
      backtrace into the buffer *Redisplay-trace*.  */
+  /* FIXME: Turn this into a `handler-bind` installed during redisplay?  */
   if (!debugger_called && !NILP (error_symbol)
       && backtrace_on_redisplay_error
       && (NILP (clause) || h == redisplay_deep_handler)
@@ -2052,13 +2130,10 @@ find_handler_clause (Lisp_Object handlers, Lisp_Object conditions)
   register Lisp_Object h;
 
   /* t is used by handlers for all conditions, set up by C code.  */
-  if (EQ (handlers, Qt))
-    return Qt;
-
   /* error is used similarly, but means print an error message
      and run the debugger if that is enabled.  */
-  if (EQ (handlers, Qerror))
-    return Qt;
+  if (!CONSP (handlers))
+    return handlers;
 
   for (h = handlers; CONSP (h); h = XCDR (h))
     {
@@ -4461,6 +4536,7 @@ alist of active lexical bindings.  */);
   defsubr (&Sthrow);
   defsubr (&Sunwind_protect);
   defsubr (&Scondition_case);
+  defsubr (&Shandler_bind_1);
   DEFSYM (QCsuccess, ":success");
   defsubr (&Ssignal);
   defsubr (&Scommandp);

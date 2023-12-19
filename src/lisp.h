@@ -3595,7 +3595,8 @@ record_in_backtrace (Lisp_Object function, Lisp_Object *args, ptrdiff_t nargs)
 }
 
 /* This structure helps implement the `catch/throw' and `condition-case/signal'
-   control structures.  A struct handler contains all the information needed to
+   control structures as well as 'handler-bind'.
+   A struct handler contains all the information needed to
    restore the state of the interpreter after a non-local jump.
 
    Handler structures are chained together in a doubly linked list; the `next'
@@ -3616,9 +3617,23 @@ record_in_backtrace (Lisp_Object function, Lisp_Object *args, ptrdiff_t nargs)
    state.
 
    Members are volatile if their values need to survive _longjmp when
-   a 'struct handler' is a local variable.  */
+   a 'struct handler' is a local variable.
 
-enum handlertype { CATCHER, CONDITION_CASE, CATCHER_ALL };
+   For the HANDLER and SKIP_CONDITIONS cases, we only make use of the
+   `tag_or_ch` field and none of the rest, because there's no longjmp
+   to jump to.
+   [ Maybe we should split the handler-list into a list of restart point
+     (for CATCHERs and CONDITION_CASEs) and a list of conditions handlers
+     (for HANDLERs and CONDITION_CASEs)?  ]
+
+   When running the HANDLER of a 'handler-bind', we need to
+   temporarily "mute" the CONDITION_CASEs and HANDLERs that are "below"
+   the current handler, but without hiding any CATCHERs.  We do that by
+   installing a SKIP_CONDITIONS which tells the search to skip the
+   N next conditions.  */
+
+enum handlertype { CATCHER, CONDITION_CASE, CATCHER_ALL,
+                   HANDLER, SKIP_CONDITIONS };
 
 enum nonlocal_exit
 {
