@@ -242,7 +242,7 @@ arguments to pass to the OPERATION."
   (filename &optional visit beg end replace)
   "Like `insert-file-contents' for Tramp files."
   (setq filename (expand-file-name filename))
-  (let (signal-hook-function result)
+  (let (result)
     (unwind-protect
         (setq result
 	      (insert-file-contents

@@ -297,9 +297,7 @@ arguments to pass to the OPERATION."
 		 (cons uid tramp-unknown-id-integer)
 		 (cons gid tramp-unknown-id-integer)
 		 tramp-time-dont-know   ; atime
-		 ;; `date-to-time' checks `iso8601-parse', which might fail.
-		 (let (signal-hook-function)
-		   (date-to-time date))	; mtime
+		 (date-to-time date)	; mtime
 		 tramp-time-dont-know   ; ctime
 		 size
 		 mod-string

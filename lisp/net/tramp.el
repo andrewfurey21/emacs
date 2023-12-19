@@ -1085,10 +1085,10 @@ Derived from `tramp-postfix-host-format'.")
 (defconst tramp-localname-regexp (rx (* (not (any "\r\n"))) eos)
   "Regexp matching localnames.")
 
-(defconst tramp-unknown-id-string "UNKNOWN"
+(defvar tramp-unknown-id-string "UNKNOWN"
   "String used to denote an unknown user or group.")
 
-(defconst tramp-unknown-id-integer -1
+(defvar tramp-unknown-id-integer -1
   "Integer used to denote an unknown user or group.")
 
 ;;;###tramp-autoload
@@ -1994,16 +1994,16 @@ does not exist, otherwise propagate the error."
 
 ;; This function provides traces in case of errors not triggered by
 ;; Tramp functions.
-(defun tramp-signal-hook-function (error-symbol data)
-  "Function to be called via `signal-hook-function'."
+(defun tramp--trace-errors (err)
+  "Function to be called via `handler-bind'."
   ;; `custom-initialize-*' functions provoke `void-variable' errors.
   ;; We don't want to see them in the backtrace.
   (declare (tramp-suppress-trace t))
-  (unless (eq error-symbol 'void-variable)
+  (unless (eq (car err) 'void-variable)
     (let ((inhibit-message t))
       (tramp-error
-       (car tramp-current-connection) error-symbol
-       (mapconcat (lambda (x) (format "%s" x)) data " ")))))
+       (car tramp-current-connection) (car err)
+       (mapconcat (lambda (x) (format "%s" x)) (cdr err) " ")))))
 
 (defmacro with-parsed-tramp-file-name (filename var &rest body)
   "Parse a Tramp filename and make components available in the body.
@@ -2081,7 +2081,7 @@ without a visible progress reporter."
 (defmacro with-tramp-timeout (list &rest body)
   "Like `with-timeout', but allow SECONDS to be nil.
 
-(fn (SECONDS TIMEOUT-FORMS...) BODY)"
+\(fn (SECONDS TIMEOUT-FORMS...) BODY)"
   (declare (indent 1) (debug ((form body) body)))
   (let ((seconds (car list))
 	(timeout-forms (cdr list)))
@@ -2248,8 +2248,7 @@ arguments to pass to the OPERATION."
 	    ,(and (eq inhibit-file-name-operation operation)
 		  inhibit-file-name-handlers)))
 	 (inhibit-file-name-operation operation)
-	 (args (if (tramp-file-name-p (car args)) (cons nil (cdr args)) args))
-	 signal-hook-function)
+	 (args (if (tramp-file-name-p (car args)) (cons nil (cdr args)) args)))
     (apply operation args)))
 
 ;; We handle here all file primitives.  Most of them have the file
@@ -2386,8 +2385,8 @@ Fall back to normal file name handler if no Tramp file name handler exists."
             (let ((current-connection tramp-current-connection)
 		  (foreign
 		   (tramp-find-foreign-file-name-handler v operation))
-		  (signal-hook-function #'tramp-signal-hook-function)
 		  result)
+	      (handler-bind ((error #'tramp--trace-errors))
 	      ;; Set `tramp-current-connection'.
 	      (unless
 		  (tramp-file-name-equal-p v (car tramp-current-connection))
@@ -2453,7 +2452,7 @@ Fall back to normal file name handler if no Tramp file name handler exists."
 		(unless
 		    (tramp-file-name-equal-p
 		     (car current-connection) (car tramp-current-connection))
-		  (setq tramp-current-connection current-connection))))))
+		  (setq tramp-current-connection current-connection)))))))
 
       ;; When `tramp-mode' is not enabled, or the file name is quoted,
       ;; we don't do anything.
@@ -4584,7 +4583,7 @@ Do not set it manually, it is used buffer-local in `tramp-get-lock-pid'.")
 
 	;; Do the lock.
         (let ((tramp-verbose 0)
-              create-lockfiles signal-hook-function)
+              create-lockfiles)
 	  (condition-case nil
 	      (make-symbolic-link info lockname 'ok-if-already-exists)
 	    (error
@@ -4632,8 +4631,7 @@ Do not set it manually, it is used buffer-local in `tramp-get-lock-pid'.")
       (tramp-error v 'file-missing file))
     (if (not (file-exists-p file))
 	nil
-      (let ((signal-hook-function (unless noerror signal-hook-function))
-	    (inhibit-message (or inhibit-message nomessage)))
+      (let ((inhibit-message (or inhibit-message nomessage)))
 	(with-tramp-progress-reporter v 0 (format "Loading %s" file)
 	  (let ((local-copy (file-local-copy file)))
 	    (unwind-protect
@@ -4651,7 +4649,7 @@ Do not set it manually, it is used buffer-local in `tramp-get-lock-pid'.")
   "Add ad-hoc proxy definitions to `tramp-default-proxies-alist'."
   (when-let ((hops (tramp-file-name-hop vec))
 	     (item vec))
-    (let (signal-hook-function changed)
+    (let (changed)
       (dolist
 	  (proxy (reverse (split-string hops tramp-postfix-hop-regexp 'omit)))
 	(let* ((host-port (tramp-file-name-host-port item))

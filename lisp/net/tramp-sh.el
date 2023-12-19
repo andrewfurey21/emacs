@@ -3168,12 +3168,11 @@ implementation will be used."
 	(setcdr signals (cddr signals)))
       ;; Sanity check.  "kill -l" shall have returned just the signal
       ;; names.  Some shells don't, like the one in "docker alpine".
-      (let (signal-hook-function)
-	(condition-case nil
-	    (dolist (sig (cdr signals))
-	      (unless (string-match-p (rx bol (+ (any "+-" alnum)) eol) sig)
-		(error nil)))
-	  (error (setq signals '(0)))))
+      (condition-case nil
+	  (dolist (sig (cdr signals))
+	    (unless (string-match-p (rx bol (+ (any "+-" alnum)) eol) sig)
+	      (error nil)))
+	(error (setq signals '(0))))
       (dotimes (i 128)
 	(push
 	 (cond
@@ -5536,9 +5535,7 @@ raises an error."
       ;; Read the expression.
       (condition-case nil
 	  (prog1
-	      (let ((signal-hook-function
-		     (unless noerror signal-hook-function)))
-		(read (current-buffer)))
+	      (read (current-buffer))
 	    ;; Error handling.
 	    (when (search-forward-regexp (rx (not space)) (line-end-position) t)
 	      (error nil)))

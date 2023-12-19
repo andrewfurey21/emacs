@@ -207,8 +207,7 @@ Message is formatted with FMT-STRING as control string and the remaining
 ARGUMENTS to actually emit the message (if applicable)."
   (declare (tramp-suppress-trace t))
   (let ((inhibit-message t)
-	create-lockfiles file-name-handler-alist message-log-max
-	signal-hook-function)
+	create-lockfiles file-name-handler-alist message-log-max)
     (with-current-buffer (tramp-get-debug-buffer vec)
       (goto-char (point-max))
       (let ((point (point)))
@@ -364,7 +363,7 @@ VEC-OR-PROC identifies the connection to use, SIGNAL is the
 signal identifier to be raised, remaining arguments passed to
 `tramp-message'.  Finally, signal SIGNAL is raised with
 FMT-STRING and ARGUMENTS."
-  (let (signal-hook-function)
+  (let ()
     (tramp-backtrace vec-or-proc)
     (unless arguments
       ;; FMT-STRING could be just a file name, as in
