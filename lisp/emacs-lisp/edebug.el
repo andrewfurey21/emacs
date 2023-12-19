@@ -2261,8 +2261,8 @@ are too difficult to instrument")
 
 ;;; Handling signals
 
-(defun edebug-signal (signal-name signal-data)
-  "Signal an error.  Args are SIGNAL-NAME, and associated DATA.
+(defun edebug-signal (err)
+  "Signal an error.  ERR is the list made of the signal name and its data.
 A signal name is a symbol with an `error-conditions' property
 that is a list of condition names.
 A handler for any of those names will get to handle this signal.
@@ -2272,17 +2272,12 @@ DATA should be a list.  Its elements are printed as part of the error message.
 If the signal is handled, DATA is made available to the handler.
 See `condition-case'.
 
-This is the Edebug replacement for the standard `signal'.  It should
-only be active while Edebug is.  It checks `debug-on-error' to see
+This is the error handler installed during Edebug.
+It should only be active while Edebug is.  It checks `debug-on-error' to see
 whether it should call the debugger.  When execution is resumed, the
-error is signaled again."
-  (if (and (listp debug-on-error) (memq signal-name debug-on-error))
-      (edebug 'error (cons signal-name signal-data)))
-  ;; If we reach here without another non-local exit, then send signal again.
-  ;; i.e. the signal is not continuable, yet.
-  ;; Avoid infinite recursion.
-  (let ((signal-hook-function nil))
-    (signal signal-name signal-data)))
+error is propagated further."
+  (if (and (listp debug-on-error) (memq (car err) debug-on-error))
+      (edebug 'error err)))
 
 ;;; Entering Edebug
 
@@ -2326,7 +2321,7 @@ and run its entry function, and set up `edebug-before' and
               (debug-on-error (or debug-on-error edebug-on-error))
               (debug-on-quit edebug-on-quit))
           (unwind-protect
-              (let ((signal-hook-function #'edebug-signal))
+              (handler-bind ((error #'edebug-signal))
                 (setq edebug-execution-mode (or edebug-next-execution-mode
                                                 edebug-initial-mode
                                                 edebug-execution-mode)
@@ -2937,14 +2932,11 @@ when edebug becomes active."
 	       (not (memq arg-mode '(after error))))
 	  (message "Break"))
 
-      (setq signal-hook-function nil)
-
       (edebug-mode 1)
       (unwind-protect
 	  (recursive-edit)		;  <<<<<<<<<< Recursive edit
 
 	;; Do the following, even if quit occurs.
-	(setq signal-hook-function #'edebug-signal)
 	(if edebug-backtrace-buffer
 	    (kill-buffer edebug-backtrace-buffer))
 
