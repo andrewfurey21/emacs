@@ -68,7 +68,8 @@ of the build process."
 	                    (funcall prin1 (car args))
 	                    (setq args (cdr args)))
 	             (princ " ")))
-	       (princ ")\n")))))))
+	       (princ ")\n")))
+	 #'debug-early))))
 
 (defalias 'debug-early
   #'(lambda (&rest args)
@@ -93,5 +94,9 @@ available before `debug' was usable.)"
   (princ " ")
   (prin1 (cdr (car (cdr args))))	; The error data.
   (debug-early-backtrace)))
+
+(defalias 'debug-early--handler
+  #'(lambda (err)
+      (if backtrace-on-error-noninteractive (debug-early 'error err))))
 
 ;;; debug-early.el ends here.

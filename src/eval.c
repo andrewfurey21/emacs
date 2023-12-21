@@ -317,6 +317,7 @@ call_debugger (Lisp_Object arg)
   /* Interrupting redisplay and resuming it later is not safe under
      all circumstances.  So, when the debugger returns, abort the
      interrupted redisplay by going back to the top-level.  */
+  /* FIXME: Move this to the redisplay code?  */
   if (debug_while_redisplaying
       && !EQ (Vdebugger, Qdebug_early))
     Ftop_level ();
@@ -1192,7 +1193,7 @@ usage: (catch TAG BODY...)  */)
 
 #define clobbered_eassert(E) verify (sizeof (E) != 0)
 
-static void
+void
 pop_handler (void)
 {
   handlerlist = handlerlist->next;
@@ -1882,24 +1883,6 @@ signal_or_quit (Lisp_Object error_symbol, Lisp_Object data, bool keyboard_quit)
 	 can continue code which has signaled a quit.  */
       if (keyboard_quit && debugger_called && EQ (real_error_symbol, Qquit))
 	return Qnil;
-    }
-
-  /* If we're in batch mode, print a backtrace unconditionally to help
-     with debugging.  Make sure to use `debug-early' unconditionally
-     to not interfere with ERT or other packages that install custom
-     debuggers.  */
-  /* FIXME: This could be turned into a `handler-bind` at toplevel?  */
-  if (!debugger_called && !NILP (error_symbol)
-      && (NILP (clause) || EQ (clause, Qerror))
-      && noninteractive && backtrace_on_error_noninteractive
-      && NILP (Vinhibit_debugger)
-      && !NILP (Ffboundp (Qdebug_early)))
-    {
-      max_ensure_room (&max_lisp_eval_depth, lisp_eval_depth, 100);
-      specpdl_ref count = SPECPDL_INDEX ();
-      specbind (Qdebugger, Qdebug_early);
-      call_debugger (list2 (Qerror, Fcons (error_symbol, data)));
-      unbind_to (count, Qnil);
     }
 
   /* If an error is signaled during a Lisp hook in redisplay, write a
@@ -4364,6 +4347,7 @@ before making `inhibit-quit' nil.  */);
   DEFSYM (QCdocumentation, ":documentation");
   DEFSYM (Qdebug, "debug");
   DEFSYM (Qdebug_early, "debug-early");
+  DEFSYM (Qdebug_early__handler, "debug-early--handler");
 
   DEFVAR_LISP ("inhibit-debugger", Vinhibit_debugger,
 	       doc: /* Non-nil means never enter the debugger.
